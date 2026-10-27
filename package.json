@@ -4,6 +4,13 @@
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
   "version": "0.0.2",
   "publisher": "nksharmaexe",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nksharmaexe/waypoint"
+  },
+  "bugs": {
+    "url": "https://github.com/nksharmaexe/waypoint/issues"
+  },
   "keywords": [
     "git",
     "snapshot",
@@ -30,7 +37,7 @@
         {
           "id": "waypoint",
           "title": "Waypoint",
-          "icon": "$(history)"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -38,7 +45,8 @@
       "waypoint": [
         {
           "id": "waypointView",
-          "name": "Checkpoints"
+          "name": "Checkpoints",
+          "icon": "media/icon.svg"  
         }
       ]
     },
