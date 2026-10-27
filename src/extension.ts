@@ -6,8 +6,40 @@ import * as path from "path";
 
 let root = "";
 const AUTO_PREFIX = "Auto · ";
-
+const GUARD_PREFIX = "Guard · ";
+const BASE_SCHEME = "waypoint-base";
 // ---------- git helpers ----------
+
+async function lastHeadOp(): Promise<
+  { text: string; ageSec: number } | undefined
+> {
+  try {
+    const out = (
+      await git([
+        "log",
+        "-g",
+        "-1",
+        "--date=unix",
+        "--format=%gd%x09%gs",
+        "HEAD",
+      ])
+    ).trim();
+    const [sel, text] = out.split("\t");
+    const ts = Number(/\{(\d+)\}/.exec(sel ?? "")?.[1]);
+    return { text: text ?? "", ageSec: ts ? Date.now() / 1000 - ts : 0 };
+  } catch {
+    return undefined;
+  }
+}
+
+async function isIgnored(rel: string): Promise<boolean> {
+  try {
+    await git(["check-ignore", "-q", "--", rel]); // exit 0 = ignored
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function git(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -163,9 +195,11 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
   private comparison?: { a: CP; b: Target };
   private filter = "";
   onFilterChange?: (f: string) => void;
+  onRefresh?: () => void;
 
   refresh() {
     this._change.fire();
+    this.onRefresh?.();
   }
   setComparison(c?: { a: CP; b: Target }) {
     this.comparison = c;
@@ -288,8 +322,13 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       item.description = node.cp.date.toLocaleTimeString();
       item.tooltip = node.cp.date.toLocaleString();
       item.contextValue = "checkpoint";
+      const l = node.cp.label;
       item.iconPath = new vscode.ThemeIcon(
-        node.cp.label.startsWith(AUTO_PREFIX) ? "clock" : "bookmark",
+        l.startsWith(GUARD_PREFIX)
+          ? "shield"
+          : l.startsWith(AUTO_PREFIX)
+            ? "clock"
+            : "bookmark",
       );
       item.id = node.cp.ref;
       return item;
@@ -421,6 +460,222 @@ async function watchCommits(
   context.subscriptions.push(watcher);
 }
 
+// ---------- gutter markers (quick diff against latest checkpoint) ----------
+
+class BaseContent implements vscode.TextDocumentContentProvider {
+  private _e = new vscode.EventEmitter<vscode.Uri>();
+  onDidChange = this._e.event;
+  private served = new Map<string, vscode.Uri>();
+  ref = "HEAD";
+
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    this.served.set(uri.toString(), uri);
+    try {
+      return await git(["show", `${this.ref}:${uri.path.slice(1)}`]);
+    } catch {
+      return ""; // file didn't exist at the base: everything shows as added
+    }
+  }
+
+  setRef(ref: string) {
+    if (ref === this.ref) return;
+    this.ref = ref;
+    this.served.forEach((u) => this._e.fire(u)); // tell open editors to re-diff
+  }
+}
+
+class Gutter {
+  private content = new BaseContent();
+  private sc?: vscode.SourceControl;
+
+  start(context: vscode.ExtensionContext) {
+    context.subscriptions.push(
+      vscode.workspace.registerTextDocumentContentProvider(
+        BASE_SCHEME,
+        this.content,
+      ),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("waypoint.gutter.enabled")) this.apply();
+      }),
+      { dispose: () => this.sc?.dispose() },
+    );
+    this.apply();
+    this.refreshBase();
+  }
+
+  private apply() {
+    const on = cfg().get<boolean>("gutter.enabled", true);
+    if (on && !this.sc) {
+      this.sc = vscode.scm.createSourceControl(
+        "waypoint",
+        "Waypoint",
+        vscode.Uri.file(root),
+      );
+      this.sc.quickDiffProvider = {
+        provideOriginalResource: async (uri: vscode.Uri) => {
+          if (uri.scheme !== "file") return undefined;
+          const rel = path.relative(root, uri.fsPath);
+          if (!rel || rel.startsWith("..") || rel.startsWith(".git" + path.sep))
+            return undefined;
+          if (await isIgnored(rel)) return undefined; // don't paint ignored files as "all added"
+          return vscode.Uri.from({
+            scheme: BASE_SCHEME,
+            path: "/" + rel.split(path.sep).join("/"),
+          });
+        },
+      };
+    } else if (!on && this.sc) {
+      this.sc.dispose();
+      this.sc = undefined;
+    }
+  }
+
+  /** Point the gutter at the newest checkpoint (or HEAD when there are none). */
+  async refreshBase() {
+    try {
+      const list = await listCheckpoints();
+      this.content.setRef(list.length ? list[list.length - 1].ref : "HEAD");
+    } catch {
+      /* not a git repo */
+    }
+  }
+}
+
+// ---------- safety net: checkpoint before risky moments ----------
+
+class SafetyNet {
+  private base = ""; // snapshot of the last "quiet" moment
+  private baseHead = "";
+  private pending = new Set<string>(); // files changed outside the editor
+  private pendingSince = 0;
+  private saves = new Map<string, number>(); // files the editor itself is saving
+  private timer?: NodeJS.Timeout;
+  private running = false;
+
+  constructor(private tree: CheckpointTree) {}
+
+  async start(context: vscode.ExtensionContext) {
+    this.base = await snapshotTree().catch(() => "");
+    this.baseHead = await headSha();
+
+    const w = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(root, "**/*"),
+    );
+    const onEvent = (uri: vscode.Uri) => this.onFile(uri);
+    context.subscriptions.push(
+      w,
+      w.onDidChange(onEvent),
+      w.onDidCreate(onEvent),
+      w.onDidDelete(onEvent),
+      // fires before the write, so editor saves are never mistaken for outside changes
+      vscode.workspace.onWillSaveTextDocument((e) => {
+        this.saves.set(e.document.uri.fsPath, Date.now());
+      }),
+      { dispose: () => clearTimeout(this.timer) },
+    );
+  }
+
+  private onFile(uri: vscode.Uri) {
+    if (!cfg().get<boolean>("safety.enabled", true)) return;
+    const p = uri.fsPath;
+    if (
+      p.includes(`${path.sep}.git${path.sep}`) ||
+      p.includes(`${path.sep}node_modules${path.sep}`)
+    )
+      return;
+
+    const savedAt = this.saves.get(p);
+    if (!savedAt || Date.now() - savedAt > 3000) {
+      if (this.pending.size === 0) this.pendingSince = Date.now();
+      this.pending.add(p);
+    }
+    this.schedule(2500);
+  }
+
+  private schedule(ms: number) {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.settle().catch(() => {}), ms);
+  }
+
+  private advance(treeSha: string, head: string) {
+    this.base = treeSha;
+    this.baseHead = head;
+    this.pending.clear();
+    this.pendingSince = 0;
+  }
+
+  private async settle() {
+    if (this.running) return this.schedule(2500);
+    this.running = true;
+    try {
+      const now = await snapshotTree();
+      const head = await headSha();
+      const threshold = Math.max(
+        2,
+        cfg().get<number>("safety.bulkChangeThreshold", 6),
+      );
+
+      let reason = "";
+      if (this.pending.size > 0) {
+        const op = await lastHeadOp();
+        if (
+          head !== this.baseHead &&
+          op &&
+          op.ageSec < 60 &&
+          !op.text.startsWith("commit")
+        ) {
+          reason = `before ${op.text.slice(0, 50)}`; // e.g. "before reset: moving to HEAD~1"
+        } else if (this.pending.size >= threshold) {
+          reason = `before bulk change (${this.pending.size} files)`;
+        }
+      }
+
+      if (reason) {
+        if (
+          this.base &&
+          this.base !== now &&
+          !(await this.isLatestCheckpoint(this.base))
+        ) {
+          await createCheckpoint(GUARD_PREFIX + reason, this.base);
+          await this.prune();
+          vscode.window.setStatusBarMessage(
+            `Waypoint: saved "${GUARD_PREFIX}${reason}"`,
+            6000,
+          );
+          this.tree.refresh();
+        }
+        this.advance(now, head);
+      } else if (
+        this.pending.size === 0 ||
+        Date.now() - this.pendingSince > 30_000
+      ) {
+        // only normal editing (or a small change that has aged out): move the baseline forward
+        this.advance(now, head);
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async isLatestCheckpoint(treeSha: string): Promise<boolean> {
+    const list = await listCheckpoints();
+    if (!list.length) return false;
+    const last = (
+      await git(["rev-parse", `${list[list.length - 1].ref}^{tree}`])
+    ).trim();
+    return last === treeSha;
+  }
+
+  private async prune() {
+    const keep = Math.max(1, cfg().get<number>("safety.keep", 10));
+    const guards = (await listCheckpoints()).filter((c) =>
+      c.label.startsWith(GUARD_PREFIX),
+    );
+    for (const old of guards.slice(0, Math.max(0, guards.length - keep))) {
+      await git(["update-ref", "-d", old.ref]);
+    }
+  }
+}
 // ---------- activate ----------
 
 export function activate(context: vscode.ExtensionContext) {
@@ -428,6 +683,11 @@ export function activate(context: vscode.ExtensionContext) {
   if (!root) return;
 
   const tree = new CheckpointTree();
+  const gutter = new Gutter();
+  gutter.start(context);
+  tree.onRefresh = () => gutter.refreshBase();
+
+  new SafetyNet(tree).start(context);
   let selected: CP | undefined;
 
   // status bar button
@@ -506,7 +766,9 @@ export function activate(context: vscode.ExtensionContext) {
         await createCheckpoint(label);
         tree.refresh();
       } catch (e: any) {
-        vscode.window.showErrorMessage(`Checkpoint failed: Waypoint: ${e.message}`);
+        vscode.window.showErrorMessage(
+          `Checkpoint failed: Waypoint: ${e.message}`,
+        );
       }
     }),
 
@@ -531,6 +793,23 @@ export function activate(context: vscode.ExtensionContext) {
         tree.refresh();
       },
     ),
+    vscode.commands.registerCommand("waypoint.beforeAgent", async () => {
+      const time = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      await createCheckpoint(`Before agent · ${time}`);
+      tree.refresh();
+    }),
+
+    vscode.commands.registerCommand("waypoint.toggleGutter", () => {
+      const c = cfg();
+      return c.update(
+        "gutter.enabled",
+        !c.get<boolean>("gutter.enabled", true),
+        vscode.ConfigurationTarget.Global,
+      );
+    }),
 
     vscode.commands.registerCommand(
       "checkpoints.delete",

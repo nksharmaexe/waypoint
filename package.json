@@ -2,7 +2,7 @@
   "name": "waypoint",
   "displayName": "Waypoint – Git Snapshots",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "nksharmaexe",
   "repository": {
     "type": "git",
@@ -47,11 +47,21 @@
         {
           "id": "waypointView",
           "name": "Checkpoints",
-          "icon": "media/icon.svg"  
+          "icon": "media/icon.svg"
         }
       ]
     },
     "commands": [
+      {
+        "command": "waypoint.beforeAgent",
+        "title": "Checkpoint Before Agent",
+        "category": "Waypoint"
+      },
+      {
+        "command": "waypoint.toggleGutter",
+        "title": "Toggle Gutter Markers",
+        "category": "Waypoint"
+      },
       {
         "command": "checkpoints.create",
         "title": "Create Checkpoint",
@@ -178,6 +188,26 @@
           "type": "number",
           "default": 0,
           "description": "Create an automatic checkpoint every N minutes if files changed. 0 = off."
+        },
+        "waypoint.safety.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save a checkpoint before pulls, checkouts, resets, rebases and bulk file changes."
+        },
+        "waypoint.safety.bulkChangeThreshold": {
+          "type": "number",
+          "default": 6,
+          "description": "How many files changed outside the editor count as a bulk change (agents, discard all, codegen)."
+        },
+        "waypoint.safety.keep": {
+          "type": "number",
+          "default": 10,
+          "description": "How many automatic safety checkpoints to keep."
+        },
+        "waypoint.gutter.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show gutter markers for changes since the latest checkpoint."
         },
         "checkpoints.autoKeep": {
           "type": "number",
