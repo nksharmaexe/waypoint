@@ -439,7 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
   sb.tooltip = "Waypoint: create checkpoint (Ctrl/Cmd+Alt+K)";
   sb.command = "checkpoints.create";
   sb.show();
-  const view = vscode.window.createTreeView("checkpointsView", {
+  const view = vscode.window.createTreeView("waypointView", {
     treeDataProvider: tree,
   });
   tree.onFilterChange = (f) => {
@@ -456,7 +456,6 @@ export function activate(context: vscode.ExtensionContext) {
       SCHEME,
       new CheckpointContent(),
     ),
-    vscode.window.createTreeView("checkpointsView", { treeDataProvider: tree }),
     view,
   );
 

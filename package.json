@@ -11,6 +11,7 @@
   "bugs": {
     "url": "https://github.com/nksharmaexe/waypoint/issues"
   },
+  "vscode:prepublish": "npm run compile",
   "keywords": [
     "git",
     "snapshot",
@@ -106,27 +107,27 @@
       "view/title": [
         {
           "command": "checkpoints.create",
-          "when": "view == checkpointsView",
+          "when": "view == waypointView",
           "group": "navigation@1"
         },
         {
           "command": "checkpoints.refresh",
-          "when": "view == checkpointsView",
+          "when": "view == waypointView",
           "group": "navigation@2"
         },
         {
           "command": "checkpoints.clear",
-          "when": "view == checkpointsView",
+          "when": "view == waypointView",
           "group": "navigation@3"
         },
         {
           "command": "checkpoints.filter",
-          "when": "view == checkpointsView",
+          "when": "view == waypointView",
           "group": "navigation@4"
         },
         {
           "command": "checkpoints.clearFilter",
-          "when": "view == checkpointsView && checkpoints.filterActive",
+          "when": "view == waypointView && checkpoints.filterActive",
           "group": "navigation@5"
         }
       ],
