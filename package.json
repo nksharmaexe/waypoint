@@ -1,0 +1,197 @@
+{
+  "name": "waypoint",
+  "displayName": "Waypoint – Git Snapshots",
+  "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
+  "version": "0.0.2",
+  "publisher": "nksharmaexe",
+  "keywords": [
+    "git",
+    "snapshot",
+    "checkpoint",
+    "diff",
+    "undo",
+    "local history"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "waypoint",
+          "title": "Waypoint",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "views": {
+      "waypoint": [
+        {
+          "id": "waypointView",
+          "name": "Checkpoints"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "checkpoints.create",
+        "title": "Create Checkpoint",
+        "icon": "$(add)"
+      },
+      {
+        "command": "checkpoints.refresh",
+        "title": "Refresh Checkpoints",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "checkpoints.clear",
+        "title": "Clear All Checkpoints",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "checkpoints.restore",
+        "title": "Restore Checkpoint"
+      },
+      {
+        "command": "checkpoints.delete",
+        "title": "Delete Checkpoint"
+      },
+      {
+        "command": "checkpoints.selectForCompare",
+        "title": "Select for Compare"
+      },
+      {
+        "command": "checkpoints.compareWithSelected",
+        "title": "Compare with Selected"
+      },
+      {
+        "command": "checkpoints.clearComparison",
+        "title": "Close Comparison",
+        "icon": "$(close)"
+      },
+      {
+        "command": "checkpoints.compareWithWorking",
+        "title": "Compare with Working Changes"
+      },
+      {
+        "command": "checkpoints.filter",
+        "title": "Filter Files",
+        "icon": "$(search)"
+      },
+      {
+        "command": "checkpoints.clearFilter",
+        "title": "Clear Filter",
+        "icon": "$(search-stop)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "checkpoints.create",
+          "when": "view == checkpointsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "checkpoints.refresh",
+          "when": "view == checkpointsView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "checkpoints.clear",
+          "when": "view == checkpointsView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "checkpoints.filter",
+          "when": "view == checkpointsView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "checkpoints.clearFilter",
+          "when": "view == checkpointsView && checkpoints.filterActive",
+          "group": "navigation@5"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "checkpoints.selectForCompare",
+          "when": "viewItem == checkpoint",
+          "group": "1_compare@1"
+        },
+        {
+          "command": "checkpoints.compareWithSelected",
+          "when": "viewItem == checkpoint",
+          "group": "1_compare@2"
+        },
+        {
+          "command": "checkpoints.restore",
+          "when": "viewItem == checkpoint",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "checkpoints.delete",
+          "when": "viewItem == checkpoint",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "checkpoints.clearComparison",
+          "when": "viewItem == comparison",
+          "group": "inline"
+        },
+        {
+          "command": "checkpoints.compareWithWorking",
+          "when": "viewItem == checkpoint",
+          "group": "1_compare@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "checkpoints.create",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k"
+      }
+    ],
+    "configuration": {
+      "title": "Git Checkpoints",
+      "properties": {
+        "checkpoints.autoIntervalMinutes": {
+          "type": "number",
+          "default": 0,
+          "description": "Create an automatic checkpoint every N minutes if files changed. 0 = off."
+        },
+        "checkpoints.autoKeep": {
+          "type": "number",
+          "default": 20,
+          "description": "How many automatic checkpoints to keep."
+        },
+        "checkpoints.onCommit": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "clear",
+            "keep"
+          ],
+          "default": "ask",
+          "description": "What to do with checkpoints after you make a commit."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
+}
