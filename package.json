@@ -2,7 +2,7 @@
   "name": "waypoint",
   "displayName": "Waypoint – Git Snapshots",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "nksharmaexe",
   "repository": {
     "type": "git",
@@ -52,6 +52,11 @@
       ]
     },
     "commands": [
+      {
+        "command": "waypoint.restoreFile",
+        "title": "Restore This File",
+        "icon": "$(discard)"
+      },
       {
         "command": "waypoint.beforeAgent",
         "title": "Checkpoint Before Agent",
@@ -142,6 +147,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "waypoint.restoreFile",
+          "when": "viewItem == restorableFile",
+          "group": "inline"
+        },
+        {
+          "command": "waypoint.restoreFile",
+          "when": "viewItem == restorableFile",
+          "group": "2_manage@1"
+        },
         {
           "command": "checkpoints.selectForCompare",
           "when": "viewItem == checkpoint",

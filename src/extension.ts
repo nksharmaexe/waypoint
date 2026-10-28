@@ -76,6 +76,47 @@ async function snapshotTree(): Promise<string> {
     fs.rmSync(tmp, { force: true });
   }
 }
+async function fileExistsAt(ref: string, file: string): Promise<boolean> {
+  return git(["cat-file", "-e", `${ref}:${file}`]).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Make one file on disk match its state at `ref` (delete it if it didn't exist there). */
+async function applyFileState(ref: string, file: string): Promise<void> {
+  if (await fileExistsAt(ref, file)) {
+    await git(["restore", `--source=${ref}`, "--worktree", "--", file]);
+  } else {
+    fs.rmSync(path.join(root, file), { force: true });
+  }
+}
+
+/** Hidden safety snapshot of the whole working tree; not shown in the checkpoint list. */
+async function saveToTrash(label: string): Promise<string> {
+  const snap = await snapshotTree();
+  const parent = await headSha();
+  const args = ["commit-tree", snap, "-m", label];
+  if (parent) args.push("-p", parent);
+  const commit = (await git(args)).trim();
+  const ref = `refs/checkpoints-trash/${Date.now()}`;
+  await git(["update-ref", ref, commit]);
+
+  // keep only the newest 20
+  const all = (
+    await git([
+      "for-each-ref",
+      "--sort=refname",
+      "--format=%(refname)",
+      "refs/checkpoints-trash",
+    ])
+  )
+    .split("\n")
+    .filter(Boolean);
+  for (const old of all.slice(0, Math.max(0, all.length - 20)))
+    await git(["update-ref", "-d", old]);
+  return ref;
+}
 
 interface CP {
   ref: string;
@@ -176,6 +217,7 @@ type Node =
       left: vscode.Uri;
       right: vscode.Uri;
       title: string;
+      restoreRef?: string;
     };
 
 const ICONS: Record<string, string> = {
@@ -222,6 +264,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
     baseRef: string,
     rightRef: string,
     title: (f: string) => string,
+    restoreRef?: string,
   ): Node[] {
     return changes.map((change) => ({
       kind: "file" as const,
@@ -229,6 +272,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       left: cpUri(baseRef, change.file),
       right: cpUri(rightRef, change.file),
       title: title(change.file),
+      restoreRef,
     }));
   }
 
@@ -248,6 +292,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
           ? cpUri(tree, change.file)
           : vscode.Uri.file(path.join(root, change.file)),
       title: `${path.basename(change.file)} (${baseLabel} ↔ working)`,
+      restoreRef: baseRef,
     }));
   }
 
@@ -291,6 +336,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
         node.prev,
         node.cp.ref,
         (f) => `${path.basename(f)} (before ↔ ${node.cp.label})`,
+        node.cp.ref, // restore = "how this file was at this checkpoint"
       );
     }
 
@@ -366,6 +412,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       ICONS[status] ?? "diff",
       color ? new vscode.ThemeColor(color) : undefined,
     );
+    item.contextValue = node.restoreRef ? "restorableFile" : "file";
     item.command = {
       command: "vscode.diff",
       title: "Open diff",
@@ -771,6 +818,38 @@ export function activate(context: vscode.ExtensionContext) {
         );
       }
     }),
+
+    vscode.commands.registerCommand(
+      "waypoint.restoreFile",
+      async (node: Node) => {
+        if (node?.kind !== "file" || !node.restoreRef) return;
+        const { file } = node.change;
+        const ref = node.restoreRef;
+        const exists = await fileExistsAt(ref, file);
+
+        const ok = await vscode.window.showWarningMessage(
+          exists
+            ? `Overwrite ${file} with this version?`
+            : `${file} didn't exist in this version. Delete it?`,
+          { modal: true },
+          exists ? "Restore file" : "Delete file",
+        );
+        if (!ok) return;
+
+        const trash = await saveToTrash(`Before restoring ${file}`);
+        await applyFileState(ref, file);
+        tree.refresh();
+
+        const pick = await vscode.window.showInformationMessage(
+          `${exists ? "Restored" : "Deleted"} ${path.basename(file)}`,
+          "Undo",
+        );
+        if (pick === "Undo") {
+          await applyFileState(trash, file);
+          tree.refresh();
+        }
+      },
+    ),
 
     vscode.commands.registerCommand(
       "checkpoints.restore",
