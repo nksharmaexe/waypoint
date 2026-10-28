@@ -3,7 +3,7 @@
   "displayName": "Waypoint - Git Snapshots",
   "icon": "media/icon.png",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "nksharmaexe",
   "license": "MIT",
   "categories": [
