@@ -116,11 +116,12 @@ interface CP {
 }
 
 async function listCheckpoints(): Promise<CP[]> {
+  const key = await currentKey();
   const out = await git([
     "for-each-ref",
     "--sort=refname",
     "--format=%(refname)%09%(creatordate:iso-strict)%09%(contents:subject)",
-    "refs/checkpoints",
+    `refs/checkpoints/${key}`,
   ]);
   return out
     .split("\n")
@@ -141,7 +142,8 @@ async function createCheckpoint(
   const args = ["commit-tree", tree, "-m", label];
   if (parent) args.push("-p", parent);
   const commit = (await git(args, IDENT)).trim();
-  await git(["update-ref", `refs/checkpoints/${Date.now()}`, commit]);
+  const key = await currentKey();
+  await git(["update-ref", `refs/checkpoints/${key}/${Date.now()}`, commit]);
 }
 
 async function clearAll(): Promise<void> {
@@ -204,6 +206,39 @@ async function requireRepo(): Promise<boolean> {
   return false;
 }
 
+async function branchName(): Promise<string> {
+  try {
+    return (await git(["symbolic-ref", "--short", "-q", "HEAD"])).trim(); // "" if detached
+  } catch {
+    return "";
+  }
+}
+
+/** Ref-safe key for the current branch. */
+async function currentKey(): Promise<string> {
+  const b = await branchName();
+  return b ? "br-" + encodeURIComponent(b) : "detached";
+}
+
+/** One-time move of old flat refs (refs/checkpoints/<time>) into the current branch. */
+async function migrateLegacy(): Promise<void> {
+  const out = await git([
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/checkpoints",
+  ]);
+  const flat = out
+    .split("\n")
+    .filter((r) => /^refs\/checkpoints\/\d+$/.test(r));
+  if (!flat.length) return;
+  const key = await currentKey();
+  for (const ref of flat) {
+    const id = ref.split("/").pop()!;
+    await git(["update-ref", `refs/checkpoints/${key}/${id}`, ref]);
+    await git(["update-ref", "-d", ref]);
+  }
+}
+
 // ---------- virtual documents ----------
 
 const SCHEME = "checkpoint";
@@ -261,7 +296,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
   private comparison?: { a: CP; b: Target };
   private filter = "";
   onFilterChange?: (f: string) => void;
-
+  onBranch?: (b: string) => void;
   refresh() {
     this._change.fire();
   }
@@ -331,7 +366,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       const state = root ? await repoState() : "nofolder";
       vscode.commands.executeCommand("setContext", "waypoint.state", state);
       if (state !== "ok") return [];
-
+      this.onBranch?.((await branchName()) || "detached HEAD");
       const base = await baseRef();
       const list = await listCheckpoints();
       let entries = list.map((cp, i) => ({
@@ -448,7 +483,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
 
 // ---------- auto checkpoints ----------
 
-const cfg = () => vscode.workspace.getConfiguration("checkpoints");
+const cfg = () => vscode.workspace.getConfiguration("waypoint");
 
 async function autoCheckpoint(tree: CheckpointTree) {
   const list = await listCheckpoints();
@@ -486,21 +521,26 @@ async function watchCommits(
     return;
   }
   let lastHead = await headSha();
+  let lastKey = await currentKey();
   let timer: NodeJS.Timeout | undefined;
 
   const check = async () => {
+    // branch switched (even between two branches on the same commit)
+    const key = await currentKey();
+    if (key !== lastKey) {
+      lastKey = key;
+      tree.setComparison(undefined); // also refreshes the tree
+    }
+
     const head = await headSha();
     if (!head || head === lastHead) return;
     const old = lastHead;
     lastHead = head;
     if (!old) return;
 
-    // only react when the new HEAD is a descendant of the old one (commit / fast-forward)
-    const forward = await git(["merge-base", "--is-ancestor", old, head]).then(
-      () => true,
-      () => false,
-    );
-    if (!forward) return;
+    // only a real commit offers to clear; checkout, pull and reset leave checkpoints alone
+    const op = await lastHeadOp();
+    if (!op || !op.text.startsWith("commit")) return;
 
     const list = await listCheckpoints();
     if (!list.length) return;
@@ -509,7 +549,7 @@ async function watchCommits(
     if (mode === "keep") return;
     if (mode === "ask") {
       const pick = await vscode.window.showInformationMessage(
-        `New commit detected. Clear ${list.length} checkpoint(s)?`,
+        `New commit detected. Clear ${list.length} checkpoint(s) on this branch?`,
         "Clear",
         "Keep",
       );
@@ -683,16 +723,22 @@ export function activate(context: vscode.ExtensionContext) {
   root = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? "";
 
   const tree = new CheckpointTree();
-  const safety = new SafetyNet(tree);
-  void safety.start(context);
   const view = vscode.window.createTreeView("waypointView", {
     treeDataProvider: tree,
   });
-  tree.onFilterChange = (f) => {
-    view.description = f ? `filter: ${f}` : undefined;
-    vscode.commands.executeCommand("setContext", "waypoint.filterActive", !!f);
-  };
+  let branchLabel = "";
+  let filterText = "";
+  // ...updateDescription, tree.onFilterChange, tree.onBranch: keep as they are...
   context.subscriptions.push(view);
+
+  if (!root) return; // no folder open: the sidebar shows the "open a folder" message
+
+  migrateLegacy()
+    .then(() => tree.refresh())
+    .catch(() => {});
+
+  const safety = new SafetyNet(tree);
+  void safety.start(context);
 
   let selected: CP | undefined;
 
@@ -703,13 +749,13 @@ export function activate(context: vscode.ExtensionContext) {
   );
   sb.text = "$(bookmark) Checkpoint";
   sb.tooltip = "Waypoint: create checkpoint (Ctrl/Cmd+Alt+K)";
-  sb.command = "checkpoints.create";
+  sb.command = "waypoint.create";
   sb.show();
   tree.onFilterChange = (f) => {
     view.description = f ? `filter: ${f}` : undefined;
     vscode.commands.executeCommand(
       "setContext",
-      "checkpoints.filterActive",
+      "waypoint.filterActive",
       !!f,
     );
   };
@@ -745,7 +791,7 @@ export function activate(context: vscode.ExtensionContext) {
   setupAuto();
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("checkpoints.autoIntervalMinutes"))
+      if (e.affectsConfiguration("waypoint.autoIntervalMinutes"))
         setupAuto();
     }),
     { dispose: () => clearInterval(autoTimer) },
@@ -754,7 +800,7 @@ export function activate(context: vscode.ExtensionContext) {
   watchCommits(context, tree);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("checkpoints.refresh", () =>
+    vscode.commands.registerCommand("waypoint.refresh", () =>
       tree.refresh(),
     ),
 
@@ -771,7 +817,7 @@ export function activate(context: vscode.ExtensionContext) {
         tree.refresh();
       } catch (e: any) {
         vscode.window.showErrorMessage(
-          `Checkpoint failed: Waypoint: ${e.message}`,
+          `Waypoint: checkpoint failed: ${e.message}`,
         );
       }
     }),
@@ -817,7 +863,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand(
-      "checkpoints.restore",
+      "waypoint.restore",
       async (node: Node) => {
         if (node?.kind !== "cp") return;
         const ok = await vscode.window.showWarningMessage(
@@ -847,7 +893,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand(
-      "checkpoints.delete",
+      "waypoint.delete",
       async (node: Node) => {
         if (node?.kind !== "cp") return;
         await git(["update-ref", "-d", node.cp.ref]);
@@ -855,7 +901,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
     ),
 
-    vscode.commands.registerCommand("checkpoints.clear", async () => {
+    vscode.commands.registerCommand("waypoint.clear", async () => {
       const count = (await listCheckpoints()).length;
       if (!count) return;
       const ok = await vscode.window.showWarningMessage(
@@ -869,7 +915,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand(
-      "checkpoints.selectForCompare",
+      "waypoint.selectForCompare",
       (node: Node) => {
         if (node?.kind !== "cp") return;
         selected = node.cp;
@@ -881,7 +927,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      "checkpoints.compareWithSelected",
+      "waypoint.compareWithSelected",
       (node: Node) => {
         if (node?.kind !== "cp") return;
         if (!selected) {
@@ -898,18 +944,18 @@ export function activate(context: vscode.ExtensionContext) {
       },
     ),
 
-    vscode.commands.registerCommand("checkpoints.clearComparison", () =>
+    vscode.commands.registerCommand("waypoint.clearComparison", () =>
       tree.setComparison(undefined),
     ),
     vscode.commands.registerCommand(
-      "checkpoints.compareWithWorking",
+      "waypoint.compareWithWorking",
       (node: Node) => {
         if (node?.kind !== "cp") return;
         tree.setComparison({ a: node.cp, b: "working" });
       },
     ),
 
-    vscode.commands.registerCommand("checkpoints.filter", async () => {
+    vscode.commands.registerCommand("waypoint.filter", async () => {
       const f = await vscode.window.showInputBox({
         prompt: "Show only files whose path contains…",
         placeHolder: "e.g. TargetAndIncentive, Item.tsx, .css",
@@ -917,7 +963,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (f !== undefined) tree.setFilter(f);
     }),
 
-    vscode.commands.registerCommand("checkpoints.clearFilter", () =>
+    vscode.commands.registerCommand("waypoint.clearFilter", () =>
       tree.setFilter(""),
     ),
   );

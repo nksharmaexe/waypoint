@@ -1,9 +1,15 @@
 {
   "name": "waypoint",
   "displayName": "Waypoint - Git Snapshots",
+  "icon": "media/icon.png",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.7",
+  "version": "0.1.0",
   "publisher": "nksharmaexe",
+  "license": "MIT",
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/nksharmaexe/waypoint"
@@ -11,7 +17,6 @@
   "bugs": {
     "url": "https://github.com/nksharmaexe/waypoint/issues"
   },
-  "vscode:prepublish": "npm run compile",
   "keywords": [
     "git",
     "snapshot",
@@ -28,6 +33,7 @@
     "onStartupFinished"
   ],
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
     "package": "vsce package"
@@ -85,52 +91,52 @@
         "category": "Waypoint"
       },
       {
-        "command": "checkpoints.create",
+        "command": "waypoint.create",
         "title": "Create Checkpoint",
         "icon": "$(add)"
       },
       {
-        "command": "checkpoints.refresh",
+        "command": "waypoint.refresh",
         "title": "Refresh Checkpoints",
         "icon": "$(refresh)"
       },
       {
-        "command": "checkpoints.clear",
+        "command": "waypoint.clear",
         "title": "Clear All Checkpoints",
         "icon": "$(clear-all)"
       },
       {
-        "command": "checkpoints.restore",
+        "command": "waypoint.restore",
         "title": "Restore Checkpoint"
       },
       {
-        "command": "checkpoints.delete",
+        "command": "waypoint.delete",
         "title": "Delete Checkpoint"
       },
       {
-        "command": "checkpoints.selectForCompare",
+        "command": "waypoint.selectForCompare",
         "title": "Select for Compare"
       },
       {
-        "command": "checkpoints.compareWithSelected",
+        "command": "waypoint.compareWithSelected",
         "title": "Compare with Selected"
       },
       {
-        "command": "checkpoints.clearComparison",
+        "command": "waypoint.clearComparison",
         "title": "Close Comparison",
         "icon": "$(close)"
       },
       {
-        "command": "checkpoints.compareWithWorking",
+        "command": "waypoint.compareWithWorking",
         "title": "Compare with Working Changes"
       },
       {
-        "command": "checkpoints.filter",
+        "command": "waypoint.filter",
         "title": "Filter Files",
         "icon": "$(search)"
       },
       {
-        "command": "checkpoints.clearFilter",
+        "command": "waypoint.clearFilter",
         "title": "Clear Filter",
         "icon": "$(search-stop)"
       }
@@ -138,28 +144,28 @@
     "menus": {
       "view/title": [
         {
-          "command": "checkpoints.create",
+          "command": "waypoint.create",
           "when": "view == waypointView",
           "group": "navigation@1"
         },
         {
-          "command": "checkpoints.refresh",
+          "command": "waypoint.refresh",
           "when": "view == waypointView",
           "group": "navigation@2"
         },
         {
-          "command": "checkpoints.clear",
+          "command": "waypoint.clear",
           "when": "view == waypointView",
           "group": "navigation@3"
         },
         {
-          "command": "checkpoints.filter",
+          "command": "waypoint.filter",
           "when": "view == waypointView",
           "group": "navigation@4"
         },
         {
-          "command": "checkpoints.clearFilter",
-          "when": "view == waypointView && checkpoints.filterActive",
+          "command": "waypoint.clearFilter",
+          "when": "view == waypointView && waypoint.filterActive",
           "group": "navigation@5"
         }
       ],
@@ -175,32 +181,32 @@
           "group": "2_manage@1"
         },
         {
-          "command": "checkpoints.selectForCompare",
+          "command": "waypoint.selectForCompare",
           "when": "viewItem == checkpoint",
           "group": "1_compare@1"
         },
         {
-          "command": "checkpoints.compareWithSelected",
+          "command": "waypoint.compareWithSelected",
           "when": "viewItem == checkpoint",
           "group": "1_compare@2"
         },
         {
-          "command": "checkpoints.restore",
+          "command": "waypoint.restore",
           "when": "viewItem == checkpoint",
           "group": "2_manage@1"
         },
         {
-          "command": "checkpoints.delete",
+          "command": "waypoint.delete",
           "when": "viewItem == checkpoint",
           "group": "2_manage@2"
         },
         {
-          "command": "checkpoints.clearComparison",
+          "command": "waypoint.clearComparison",
           "when": "viewItem == comparison",
           "group": "inline"
         },
         {
-          "command": "checkpoints.compareWithWorking",
+          "command": "waypoint.compareWithWorking",
           "when": "viewItem == checkpoint",
           "group": "1_compare@3"
         }
@@ -208,15 +214,15 @@
     },
     "keybindings": [
       {
-        "command": "checkpoints.create",
+        "command": "waypoint.create",
         "key": "ctrl+alt+k",
         "mac": "cmd+alt+k"
       }
     ],
     "configuration": {
-      "title": "Git Checkpoints",
+      "title": "Waypoint",
       "properties": {
-        "checkpoints.autoIntervalMinutes": {
+        "waypoint.autoIntervalMinutes": {
           "type": "number",
           "default": 0,
           "description": "Create an automatic checkpoint every N minutes if files changed. 0 = off."
@@ -236,12 +242,12 @@
           "default": 10,
           "description": "How many automatic safety checkpoints to keep."
         },
-        "checkpoints.autoKeep": {
+        "waypoint.autoKeep": {
           "type": "number",
           "default": 20,
           "description": "How many automatic checkpoints to keep."
         },
-        "checkpoints.onCommit": {
+        "waypoint.onCommit": {
           "type": "string",
           "enum": [
             "ask",
@@ -255,8 +261,8 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
-    "@types/vscode": "^1.85.0",
+    "@types/node": "18.x",
+    "@types/vscode": "1.85.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^7.0.2"
   }
