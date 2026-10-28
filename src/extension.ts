@@ -32,8 +32,6 @@ async function lastHeadOp(): Promise<
   }
 }
 
-
-
 function git(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -498,7 +496,6 @@ async function watchCommits(
   context.subscriptions.push(watcher);
 }
 
-
 // ---------- safety net: checkpoint before risky moments ----------
 
 class SafetyNet {
@@ -509,6 +506,7 @@ class SafetyNet {
   private saves = new Map<string, number>(); // files the editor itself is saving
   private timer?: NodeJS.Timeout;
   private running = false;
+  private suppressUntil = 0;
 
   constructor(private tree: CheckpointTree) {}
 
@@ -533,6 +531,11 @@ class SafetyNet {
     );
   }
 
+  /** Called by Waypoint's own file-rewriting commands so they aren't mistaken for outside changes. */
+  quiet(ms = 6000) {
+    this.suppressUntil = Date.now() + ms;
+    this.pending.clear();
+  }
   private onFile(uri: vscode.Uri) {
     if (!cfg().get<boolean>("safety.enabled", true)) return;
     const p = uri.fsPath;
@@ -543,7 +546,8 @@ class SafetyNet {
       return;
 
     const savedAt = this.saves.get(p);
-    if (!savedAt || Date.now() - savedAt > 3000) {
+    const quiet = Date.now() < this.suppressUntil;
+    if (!quiet && (!savedAt || Date.now() - savedAt > 3000)) {
       if (this.pending.size === 0) this.pendingSince = Date.now();
       this.pending.add(p);
     }
@@ -642,7 +646,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   const tree = new CheckpointTree();
 
-  new SafetyNet(tree).start(context);
+  const safety = new SafetyNet(tree);
+  safety.start(context);
   let selected: CP | undefined;
 
   // status bar button
@@ -727,37 +732,36 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand(
-      "waypoint.restoreFile",
-      async (node: Node) => {
-        if (node?.kind !== "file" || !node.restoreRef) return;
-        const { file } = node.change;
-        const ref = node.restoreRef;
-        const exists = await fileExistsAt(ref, file);
+    vscode.commands.registerCommand("waypoint.restore", async (node: Node) => {
+      if (node?.kind !== "cp") return;
+      const ok = await vscode.window.showWarningMessage(
+        `Restore "${node.cp.label}"? Your current files will be overwritten. You can undo this right after.`,
+        { modal: true },
+        "Restore",
+      );
+      if (ok !== "Restore") return;
 
-        const ok = await vscode.window.showWarningMessage(
-          exists
-            ? `Overwrite ${file} with this version?`
-            : `${file} didn't exist in this version. Delete it?`,
-          { modal: true },
-          exists ? "Restore file" : "Delete file",
-        );
-        if (!ok) return;
+      const trash = await saveToTrash(`Before restoring ${node.cp.label}`);
+      safety.quiet();
+      await git([
+        "restore",
+        `--source=${node.cp.ref}`,
+        "--worktree",
+        "--",
+        ".",
+      ]);
+      tree.refresh();
 
-        const trash = await saveToTrash(`Before restoring ${file}`);
-        await applyFileState(ref, file);
+      const pick = await vscode.window.showInformationMessage(
+        `Restored "${node.cp.label}"`,
+        "Undo",
+      );
+      if (pick === "Undo") {
+        safety.quiet();
+        await git(["restore", `--source=${trash}`, "--worktree", "--", "."]);
         tree.refresh();
-
-        const pick = await vscode.window.showInformationMessage(
-          `${exists ? "Restored" : "Deleted"} ${path.basename(file)}`,
-          "Undo",
-        );
-        if (pick === "Undo") {
-          await applyFileState(trash, file);
-          tree.refresh();
-        }
-      },
-    ),
+      }
+    }),
 
     vscode.commands.registerCommand(
       "checkpoints.restore",
@@ -788,8 +792,6 @@ export function activate(context: vscode.ExtensionContext) {
       await createCheckpoint(`Before agent · ${time}`);
       tree.refresh();
     }),
-
-
 
     vscode.commands.registerCommand(
       "checkpoints.delete",

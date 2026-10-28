@@ -1,8 +1,8 @@
 {
   "name": "waypoint",
-  "displayName": "Waypoint – Git Snapshots",
+  "displayName": "Waypoint - Git Snapshots",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "nksharmaexe",
   "repository": {
     "type": "git",
