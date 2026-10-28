@@ -1,5 +1,10 @@
 # Waypoint – Git Snapshots
 
+> [!WARNING]
+> **Temporary notice:** Waypoint is currently experiencing a bug in version `0.1.1`. Please avoid using this version until a fix is released.
+>
+> A patched version will be published as soon as possible. If you have already installed the extension, you can temporarily disable it from the Extensions panel in your IDE.
+
 **Save hidden snapshots of your work between steps, with no commits, and diff any step against the last.**
 
 You finish step 1 and don't want to commit yet. Staging it works until step 2, when everything lands in one pile again. Waypoint gives you checkpoints between steps without touching your branch, your staging area, or your commit history.
@@ -7,7 +12,6 @@ You finish step 1 and don't want to commit yet. Staging it works until step 2, w
 <!-- Add a screenshot or GIF here, using an https:// URL, e.g.
 ![Waypoint sidebar and diff](https://raw.githubusercontent.com/nksharmaexe/waypoint/main/media/demo.gif)
 -->
-
 ## Features
 
 - **Checkpoints in one click.** Press `Cmd+Alt+K` (`Ctrl+Alt+K` on Windows/Linux), use the **+** button in the sidebar, or click **Checkpoint** in the status bar.
