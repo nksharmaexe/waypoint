@@ -2,7 +2,7 @@
   "name": "waypoint",
   "displayName": "Waypoint - Git Snapshots",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "nksharmaexe",
   "repository": {
     "type": "git",
@@ -51,11 +51,33 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "waypointView",
+        "contents": "Open a folder to start saving checkpoints.\n[Open Folder](command:workbench.action.files.openFolder)",
+        "when": "waypoint.state == 'nofolder'"
+      },
+      {
+        "view": "waypointView",
+        "contents": "This folder isn't a git repository. Waypoint stores its checkpoints inside git.\n[Initialize Repository](command:waypoint.initRepo)",
+        "when": "waypoint.state == 'norepo'"
+      },
+      {
+        "view": "waypointView",
+        "contents": "Waypoint couldn't run git. Install git, make sure it's on your PATH, then reload.\n[Reload Window](command:workbench.action.reloadWindow)",
+        "when": "waypoint.state == 'nogit'"
+      }
+    ],
     "commands": [
       {
         "command": "waypoint.restoreFile",
         "title": "Restore This File",
         "icon": "$(discard)"
+      },
+      {
+        "command": "waypoint.initRepo",
+        "title": "Initialize Repository",
+        "category": "Waypoint"
       },
       {
         "command": "waypoint.beforeAgent",

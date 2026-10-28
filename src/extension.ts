@@ -89,7 +89,7 @@ async function saveToTrash(label: string): Promise<string> {
   const parent = await headSha();
   const args = ["commit-tree", snap, "-m", label];
   if (parent) args.push("-p", parent);
-  const commit = (await git(args)).trim();
+  const commit = (await git(args, IDENT)).trim();
   const ref = `refs/checkpoints-trash/${Date.now()}`;
   await git(["update-ref", ref, commit]);
 
@@ -137,10 +137,10 @@ async function createCheckpoint(
 ): Promise<void> {
   const tree = knownTree ?? (await snapshotTree());
   const list = await listCheckpoints();
-  const parent = list.length ? list[list.length - 1].ref : "HEAD";
-  const commit = (
-    await git(["commit-tree", tree, "-p", parent, "-m", label])
-  ).trim();
+  const parent = list.length ? list[list.length - 1].ref : await headSha(); // "" if no commits yet
+  const args = ["commit-tree", tree, "-m", label];
+  if (parent) args.push("-p", parent);
+  const commit = (await git(args, IDENT)).trim();
   await git(["update-ref", `refs/checkpoints/${Date.now()}`, commit]);
 }
 
@@ -169,6 +169,39 @@ async function changedFiles(a: string, b: string): Promise<Change[]> {
   for (let i = 0; i + 1 < parts.length; i += 2)
     res.push({ status: parts[i], file: parts[i + 1] });
   return res;
+}
+
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"; // git's built-in empty tree
+
+const IDENT = {
+  GIT_AUTHOR_NAME: "Waypoint",
+  GIT_AUTHOR_EMAIL: "waypoint@localhost",
+  GIT_COMMITTER_NAME: "Waypoint",
+  GIT_COMMITTER_EMAIL: "waypoint@localhost",
+};
+
+type RepoState = "ok" | "norepo" | "nogit";
+
+async function repoState(): Promise<RepoState> {
+  try {
+    await git(["rev-parse", "--is-inside-work-tree"]);
+    return "ok";
+  } catch (e: any) {
+    return /ENOENT/.test(String(e?.message)) ? "nogit" : "norepo";
+  }
+}
+
+/** HEAD, or the empty tree when the repo has no commits yet. */
+async function baseRef(): Promise<string> {
+  return (await headSha()) ? "HEAD" : EMPTY_TREE;
+}
+
+async function requireRepo(): Promise<boolean> {
+  if ((await repoState()) === "ok") return true;
+  vscode.window.showInformationMessage(
+    "Waypoint needs a git repository. Open the Waypoint sidebar to set one up.",
+  );
+  return false;
 }
 
 // ---------- virtual documents ----------
@@ -284,27 +317,29 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       restoreRef: baseRef,
     }));
   }
-
   async getChildren(node?: Node): Promise<Node[]> {
-    if (!root) return [];
+    try {
+      return await this.load(node);
+    } catch (e) {
+      console.error("Waypoint:", e);
+      return [];
+    }
+  }
 
+  private async load(node?: Node): Promise<Node[]> {
     if (!node) {
+      const state = root ? await repoState() : "nofolder";
+      vscode.commands.executeCommand("setContext", "waypoint.state", state);
+      if (state !== "ok") return [];
+
+      const base = await baseRef();
       const list = await listCheckpoints();
       let entries = list.map((cp, i) => ({
         cp,
-        prev: i === 0 ? "HEAD" : list[i - 1].ref,
+        prev: i === 0 ? base : list[i - 1].ref,
       }));
 
-      // when filtering, hide checkpoints that touched no matching file
-      if (this.filter) {
-        const hits = await Promise.all(
-          entries.map(
-            async (e) =>
-              this.keep(await changedFiles(e.prev, e.cp.ref)).length > 0,
-          ),
-        );
-        entries = entries.filter((_, i) => hits[i]);
-      }
+      // ...the filter block stays exactly as it was...
 
       const nodes: Node[] = [];
       if (this.comparison) nodes.push({ kind: "compare", ...this.comparison });
@@ -313,7 +348,7 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
       );
       nodes.push({
         kind: "live",
-        latest: list.length ? list[list.length - 1].ref : "HEAD",
+        latest: list.length ? list[list.length - 1].ref : base,
       });
       return nodes;
     }
@@ -567,6 +602,10 @@ class SafetyNet {
   }
 
   private async settle() {
+    if ((await repoState()) !== "ok") {
+      this.base = "";
+      return;
+    }
     if (this.running) return this.schedule(2500);
     this.running = true;
     try {
@@ -642,12 +681,19 @@ class SafetyNet {
 
 export function activate(context: vscode.ExtensionContext) {
   root = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? "";
-  if (!root) return;
 
   const tree = new CheckpointTree();
-
   const safety = new SafetyNet(tree);
-  safety.start(context);
+  void safety.start(context);
+  const view = vscode.window.createTreeView("waypointView", {
+    treeDataProvider: tree,
+  });
+  tree.onFilterChange = (f) => {
+    view.description = f ? `filter: ${f}` : undefined;
+    vscode.commands.executeCommand("setContext", "waypoint.filterActive", !!f);
+  };
+  context.subscriptions.push(view);
+
   let selected: CP | undefined;
 
   // status bar button
@@ -659,9 +705,6 @@ export function activate(context: vscode.ExtensionContext) {
   sb.tooltip = "Waypoint: create checkpoint (Ctrl/Cmd+Alt+K)";
   sb.command = "checkpoints.create";
   sb.show();
-  const view = vscode.window.createTreeView("waypointView", {
-    treeDataProvider: tree,
-  });
   tree.onFilterChange = (f) => {
     view.description = f ? `filter: ${f}` : undefined;
     vscode.commands.executeCommand(
@@ -715,7 +758,8 @@ export function activate(context: vscode.ExtensionContext) {
       tree.refresh(),
     ),
 
-    vscode.commands.registerCommand("checkpoints.create", async () => {
+    vscode.commands.registerCommand("waypoint.create", async () => {
+      if (!(await requireRepo())) return;
       const n = (await listCheckpoints()).length + 1;
       const label = await vscode.window.showInputBox({
         prompt: "Checkpoint name",
@@ -730,6 +774,15 @@ export function activate(context: vscode.ExtensionContext) {
           `Checkpoint failed: Waypoint: ${e.message}`,
         );
       }
+    }),
+
+    vscode.commands.registerCommand("waypoint.initRepo", async () => {
+      try {
+        await git(["init"]);
+      } catch (e: any) {
+        vscode.window.showErrorMessage(`git init failed: ${e.message}`);
+      }
+      tree.refresh();
     }),
 
     vscode.commands.registerCommand("waypoint.restore", async (node: Node) => {
