@@ -2,7 +2,7 @@
   "name": "waypoint",
   "displayName": "Waypoint – Git Snapshots",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "nksharmaexe",
   "repository": {
     "type": "git",
@@ -60,11 +60,6 @@
       {
         "command": "waypoint.beforeAgent",
         "title": "Checkpoint Before Agent",
-        "category": "Waypoint"
-      },
-      {
-        "command": "waypoint.toggleGutter",
-        "title": "Toggle Gutter Markers",
         "category": "Waypoint"
       },
       {
@@ -218,11 +213,6 @@
           "type": "number",
           "default": 10,
           "description": "How many automatic safety checkpoints to keep."
-        },
-        "waypoint.gutter.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show gutter markers for changes since the latest checkpoint."
         },
         "checkpoints.autoKeep": {
           "type": "number",

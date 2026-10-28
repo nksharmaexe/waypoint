@@ -7,7 +7,7 @@ import * as path from "path";
 let root = "";
 const AUTO_PREFIX = "Auto · ";
 const GUARD_PREFIX = "Guard · ";
-const BASE_SCHEME = "waypoint-base";
+
 // ---------- git helpers ----------
 
 async function lastHeadOp(): Promise<
@@ -32,14 +32,7 @@ async function lastHeadOp(): Promise<
   }
 }
 
-async function isIgnored(rel: string): Promise<boolean> {
-  try {
-    await git(["check-ignore", "-q", "--", rel]); // exit 0 = ignored
-    return true;
-  } catch {
-    return false;
-  }
-}
+
 
 function git(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -237,11 +230,9 @@ class CheckpointTree implements vscode.TreeDataProvider<Node> {
   private comparison?: { a: CP; b: Target };
   private filter = "";
   onFilterChange?: (f: string) => void;
-  onRefresh?: () => void;
 
   refresh() {
     this._change.fire();
-    this.onRefresh?.();
   }
   setComparison(c?: { a: CP; b: Target }) {
     this.comparison = c;
@@ -507,86 +498,6 @@ async function watchCommits(
   context.subscriptions.push(watcher);
 }
 
-// ---------- gutter markers (quick diff against latest checkpoint) ----------
-
-class BaseContent implements vscode.TextDocumentContentProvider {
-  private _e = new vscode.EventEmitter<vscode.Uri>();
-  onDidChange = this._e.event;
-  private served = new Map<string, vscode.Uri>();
-  ref = "HEAD";
-
-  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
-    this.served.set(uri.toString(), uri);
-    try {
-      return await git(["show", `${this.ref}:${uri.path.slice(1)}`]);
-    } catch {
-      return ""; // file didn't exist at the base: everything shows as added
-    }
-  }
-
-  setRef(ref: string) {
-    if (ref === this.ref) return;
-    this.ref = ref;
-    this.served.forEach((u) => this._e.fire(u)); // tell open editors to re-diff
-  }
-}
-
-class Gutter {
-  private content = new BaseContent();
-  private sc?: vscode.SourceControl;
-
-  start(context: vscode.ExtensionContext) {
-    context.subscriptions.push(
-      vscode.workspace.registerTextDocumentContentProvider(
-        BASE_SCHEME,
-        this.content,
-      ),
-      vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration("waypoint.gutter.enabled")) this.apply();
-      }),
-      { dispose: () => this.sc?.dispose() },
-    );
-    this.apply();
-    this.refreshBase();
-  }
-
-  private apply() {
-    const on = cfg().get<boolean>("gutter.enabled", true);
-    if (on && !this.sc) {
-      this.sc = vscode.scm.createSourceControl(
-        "waypoint",
-        "Waypoint",
-        vscode.Uri.file(root),
-      );
-      this.sc.quickDiffProvider = {
-        provideOriginalResource: async (uri: vscode.Uri) => {
-          if (uri.scheme !== "file") return undefined;
-          const rel = path.relative(root, uri.fsPath);
-          if (!rel || rel.startsWith("..") || rel.startsWith(".git" + path.sep))
-            return undefined;
-          if (await isIgnored(rel)) return undefined; // don't paint ignored files as "all added"
-          return vscode.Uri.from({
-            scheme: BASE_SCHEME,
-            path: "/" + rel.split(path.sep).join("/"),
-          });
-        },
-      };
-    } else if (!on && this.sc) {
-      this.sc.dispose();
-      this.sc = undefined;
-    }
-  }
-
-  /** Point the gutter at the newest checkpoint (or HEAD when there are none). */
-  async refreshBase() {
-    try {
-      const list = await listCheckpoints();
-      this.content.setRef(list.length ? list[list.length - 1].ref : "HEAD");
-    } catch {
-      /* not a git repo */
-    }
-  }
-}
 
 // ---------- safety net: checkpoint before risky moments ----------
 
@@ -730,9 +641,6 @@ export function activate(context: vscode.ExtensionContext) {
   if (!root) return;
 
   const tree = new CheckpointTree();
-  const gutter = new Gutter();
-  gutter.start(context);
-  tree.onRefresh = () => gutter.refreshBase();
 
   new SafetyNet(tree).start(context);
   let selected: CP | undefined;
@@ -881,14 +789,7 @@ export function activate(context: vscode.ExtensionContext) {
       tree.refresh();
     }),
 
-    vscode.commands.registerCommand("waypoint.toggleGutter", () => {
-      const c = cfg();
-      return c.update(
-        "gutter.enabled",
-        !c.get<boolean>("gutter.enabled", true),
-        vscode.ConfigurationTarget.Global,
-      );
-    }),
+
 
     vscode.commands.registerCommand(
       "checkpoints.delete",
