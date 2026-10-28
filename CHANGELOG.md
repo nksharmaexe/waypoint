@@ -2,6 +2,32 @@
 
 All notable changes to Waypoint are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-10-29
+
+### Fixed
+
+- Delete, Clear All, Compare, Filter and Checkpoint Before Agent did not work, because the extension failed to finish starting. Fixed.
+- Restore This File now works.
+- The current branch name shows again in the sidebar header.
+
+### Notes
+
+- Versions 0.1.1 and 0.1.2 are affected by the startup problem fixed here. Please update to 0.1.3.
+
+## [0.1.2] - 2026-10-29
+
+### Fixed
+
+- The package no longer ships stale compiled code: the build now runs automatically before packaging.
+- The “no folder open” message in the sidebar read “saving waypoint” instead of “saving checkpoints”.
+- The settings group is now titled “Waypoint”.
+
+### Changed
+
+- Added the license and Marketplace categories to the package metadata.
+- Pinned the development typings so builds are reproducible.
+- Added a temporary notice to the README about the known bug.
+
 ## [0.1.1] - 2026-10-28
 
 ### Fixed

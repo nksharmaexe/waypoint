@@ -728,7 +728,16 @@ export function activate(context: vscode.ExtensionContext) {
   });
   let branchLabel = "";
   let filterText = "";
-  // ...updateDescription, tree.onFilterChange, tree.onBranch: keep as they are...
+  const updateDescription = () => {
+    view.description =
+      [branchLabel, filterText && `filter: ${filterText}`]
+        .filter(Boolean)
+        .join(" · ") || undefined;
+  };
+  tree.onBranch = (b) => {
+    branchLabel = b;
+    updateDescription();
+  };
   context.subscriptions.push(view);
 
   if (!root) return; // no folder open: the sidebar shows the "open a folder" message
@@ -752,12 +761,9 @@ export function activate(context: vscode.ExtensionContext) {
   sb.command = "waypoint.create";
   sb.show();
   tree.onFilterChange = (f) => {
-    view.description = f ? `filter: ${f}` : undefined;
-    vscode.commands.executeCommand(
-      "setContext",
-      "waypoint.filterActive",
-      !!f,
-    );
+    filterText = f;
+    updateDescription();
+    vscode.commands.executeCommand("setContext", "waypoint.filterActive", !!f);
   };
   context.subscriptions.push(
     sb,
@@ -791,8 +797,7 @@ export function activate(context: vscode.ExtensionContext) {
   setupAuto();
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("waypoint.autoIntervalMinutes"))
-        setupAuto();
+      if (e.affectsConfiguration("waypoint.autoIntervalMinutes")) setupAuto();
     }),
     { dispose: () => clearInterval(autoTimer) },
   );
@@ -800,9 +805,7 @@ export function activate(context: vscode.ExtensionContext) {
   watchCommits(context, tree);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("waypoint.refresh", () =>
-      tree.refresh(),
-    ),
+    vscode.commands.registerCommand("waypoint.refresh", () => tree.refresh()),
 
     vscode.commands.registerCommand("waypoint.create", async () => {
       if (!(await requireRepo())) return;
@@ -861,29 +864,43 @@ export function activate(context: vscode.ExtensionContext) {
         tree.refresh();
       }
     }),
-
     vscode.commands.registerCommand(
-      "waypoint.restore",
+      "waypoint.restoreFile",
       async (node: Node) => {
-        if (node?.kind !== "cp") return;
+        if (node?.kind !== "file" || !node.restoreRef) return;
+        const { file } = node.change;
+        const ref = node.restoreRef;
+        const exists = await fileExistsAt(ref, file);
+
         const ok = await vscode.window.showWarningMessage(
-          `Restore "${node.cp.label}"? Current files will be overwritten (a safety checkpoint is saved first).`,
+          exists
+            ? `Overwrite ${file} with this version?`
+            : `${file} didn't exist in this version. Delete it?`,
           { modal: true },
-          "Restore",
+          exists ? "Restore file" : "Delete file",
         );
-        if (ok !== "Restore") return;
-        await createCheckpoint("Safety · before restore");
-        await git([
-          "restore",
-          `--source=${node.cp.ref}`,
-          "--worktree",
-          "--",
-          ".",
-        ]);
+        if (!ok) return;
+
+        const trash = await saveToTrash(`Before restoring ${file}`);
+        safety.quiet();
+        await applyFileState(ref, file);
         tree.refresh();
+
+        const pick = await vscode.window.showInformationMessage(
+          `${exists ? "Restored" : "Deleted"} ${path.basename(file)}`,
+          "Undo",
+        );
+        if (pick === "Undo") {
+          safety.quiet();
+          await applyFileState(trash, file);
+          tree.refresh();
+        }
       },
     ),
+
     vscode.commands.registerCommand("waypoint.beforeAgent", async () => {
+      if (!(await requireRepo())) return;
+
       const time = new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
@@ -892,14 +909,11 @@ export function activate(context: vscode.ExtensionContext) {
       tree.refresh();
     }),
 
-    vscode.commands.registerCommand(
-      "waypoint.delete",
-      async (node: Node) => {
-        if (node?.kind !== "cp") return;
-        await git(["update-ref", "-d", node.cp.ref]);
-        tree.refresh();
-      },
-    ),
+    vscode.commands.registerCommand("waypoint.delete", async (node: Node) => {
+      if (node?.kind !== "cp") return;
+      await git(["update-ref", "-d", node.cp.ref]);
+      tree.refresh();
+    }),
 
     vscode.commands.registerCommand("waypoint.clear", async () => {
       const count = (await listCheckpoints()).length;
