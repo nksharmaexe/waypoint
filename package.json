@@ -1,5 +1,5 @@
 {
-  "name": "waypoint",
+  "name": "waypoint-snapshots",
   "displayName": "Waypoint - Git Snapshots",
   "icon": "media/icon.png",
   "description": "Save hidden snapshots between steps, with no commits, and diff any step against the last.",
